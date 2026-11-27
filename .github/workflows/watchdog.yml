@@ -1,0 +1,30 @@
+name: watchdog
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+permissions:
+  actions: write
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: restart rate bot if prices stopped updating
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          last=$(gh api "repos/$REPO/commits?path=prices.json&per_page=1" --jq '.[0].commit.committer.date')
+          age=$(( $(date +%s) - $(date -d "$last" +%s) ))
+          echo "last prices commit $last, age ${age}s"
+          if [ "$age" -gt 240 ]; then
+            for id in $(gh api "repos/$REPO/actions/workflows/rate.yml/runs?per_page=20" --jq '.workflow_runs[]|select(.status=="in_progress" or .status=="queued")|.id'); do
+              echo "force-cancel $id"
+              gh api -X POST "repos/$REPO/actions/runs/$id/force-cancel" || true
+            done
+            sleep 20
+            gh workflow run rate.yml --repo "$REPO" --ref main
+            echo "restarted rate bot"
+          fi
