@@ -1,0 +1,28 @@
+name: rate
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/5 * * * *"
+permissions:
+  contents: write
+concurrency: rate
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: fetch
+        run: |
+          q() { curl -s -m 20 -X POST https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search -H 'content-type: application/json' -H 'clienttype: web' -d "{\"fiat\":\"$1\",\"page\":1,\"rows\":20,\"tradeType\":\"$2\",\"asset\":\"USDT\",\"countries\":[],\"proMerchantAds\":false,\"shieldMerchantAds\":false,\"publisherType\":null,\"payTypes\":[],\"classifies\":[\"mass\",\"profession\"]}"; }
+          q OMR BUY > omr.json; q EGP SELL > egp.json
+          head -c 300 omr.json; echo
+          B=$(jq '[.data[]|select((.adv.tradeMethods|map(.identifier)|join(",")|test("irtime";"i")|not) and (.adv.maxSingleTransAmount|tonumber)>=100 and (.adv.tradableQuantity|tonumber)>=100)|.adv.price|tonumber]|min' omr.json)
+          S=$(jq '[.data[]|select((.adv.tradeMethods|map(.identifier)|join(",")|test("irtime";"i")|not) and (.adv.maxSingleTransAmount|tonumber)>=5000 and (.adv.tradableQuantity|tonumber)>=100)|.adv.price|tonumber]|max' egp.json)
+          echo "buy=$B sell=$S"
+          jq -n --argjson b "$B" --argjson s "$S" '{buy:$b,sell:$s,rate:(($s/$b*100|round)/100),ts:(now*1000|floor)}' > prices.json
+          rm omr.json egp.json
+          cat prices.json
+      - name: commit
+        run: |
+          git config user.name bot; git config user.email bot@users.noreply.github.com
+          git add prices.json; git commit -m "prices" || exit 0; git push
